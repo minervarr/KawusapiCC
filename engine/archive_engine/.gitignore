@@ -1,0 +1,9 @@
+.gradle/
+build/
+.cxx/
+local.properties
+*.iml
+.idea/
+*.aar
+*.so
+compile_commands.json
