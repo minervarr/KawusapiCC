@@ -1,1 +1,0 @@
--keep class io.nava.archive_engine.** { *; }
