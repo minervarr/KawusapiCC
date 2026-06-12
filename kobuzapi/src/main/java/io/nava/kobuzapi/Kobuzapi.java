@@ -63,7 +63,7 @@ public final class Kobuzapi {
                                        String[] values);
 
     /** Returns the signed download URL response as JSON, or null. */
-    public static native String getTrackFileUrl(long handle, int trackId, int formatId);
+    public static native String getTrackFileUrl(long handle, long trackId, int formatId);
 
     /** Downloads one track; returns its file path, or null. */
     public static native String downloadTrack(long handle, int trackId, int formatId,

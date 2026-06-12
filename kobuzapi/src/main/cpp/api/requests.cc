@@ -197,7 +197,7 @@ Result<std::string> signed_post_raw(const ae::HttpClient &client, const std::str
 
 Result<FileUrl> get_track_file_url_raw(const ae::HttpClient &client,
                                        const std::string &base_url, const RequestAuth &auth,
-                                       int track_id, int format_id) {
+                                       std::int64_t track_id, int format_id) {
     std::string ts = timestamp();
     std::string sig = sign_track_file_url(format_id, track_id, ts, auth.app_secret);
 

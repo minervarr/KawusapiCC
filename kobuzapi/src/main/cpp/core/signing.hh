@@ -3,6 +3,7 @@
 // Port of src/signing.rs — MD5-based request signature generation.
 
 #include <algorithm>
+#include <cstdint>
 #include <string>
 #include <utility>
 #include <vector>
@@ -29,7 +30,7 @@ inline std::string sign_request(const std::string &method, const std::string &en
 }
 
 // Fixed-format hash for track file URL requests.
-inline std::string sign_track_file_url(int format_id, int track_id,
+inline std::string sign_track_file_url(int format_id, std::int64_t track_id,
                                        const std::string &timestamp,
                                        const std::string &app_secret) {
     std::string input = "trackgetFileUrlformat_id" + std::to_string(format_id) +

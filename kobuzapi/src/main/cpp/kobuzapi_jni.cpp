@@ -183,7 +183,7 @@ Java_io_nava_kobuzapi_Kobuzapi_apiGet(JNIEnv *env, jclass, jlong handle, jstring
 // Returns the signed file URL response as JSON, or null on failure.
 JNIEXPORT jstring JNICALL
 Java_io_nava_kobuzapi_Kobuzapi_getTrackFileUrl(JNIEnv *env, jclass, jlong handle,
-                                               jint trackId, jint formatId) {
+                                               jlong trackId, jint formatId) {
     auto *h = handle_of(handle);
     auto result = h->service.get_track_file_url(trackId, formatId);
     if (!result.ok()) {

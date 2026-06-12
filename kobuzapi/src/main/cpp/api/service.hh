@@ -89,7 +89,7 @@ public:
 
     // --- Downloads (src/api/content/tracks.rs)
 
-    Result<FileUrl> get_track_file_url(int track_id, int format_id) const;
+    Result<FileUrl> get_track_file_url(std::int64_t track_id, int format_id) const;
 
     // --- Favorites (src/api/favorites.rs)
 

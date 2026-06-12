@@ -64,7 +64,7 @@ Result<std::string> signed_post_raw(const ae::HttpClient &client, const std::str
 // get_track_file_url_raw): fixed-format signature, throttle + 429 retry.
 Result<FileUrl> get_track_file_url_raw(const ae::HttpClient &client,
                                        const std::string &base_url, const RequestAuth &auth,
-                                       int track_id, int format_id);
+                                       std::int64_t track_id, int format_id);
 
 template <typename T>
 Result<T> signed_get(const ae::HttpClient &client, const std::string &base_url,

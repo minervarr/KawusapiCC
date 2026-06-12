@@ -412,7 +412,8 @@ Result<UserFavorites> QobuzApiService::get_user_favorite_ids() const {
 
 // --- Track file URL (tracks.rs)
 
-Result<FileUrl> QobuzApiService::get_track_file_url(int track_id, int format_id) const {
+Result<FileUrl> QobuzApiService::get_track_file_url(std::int64_t track_id,
+                                                    int format_id) const {
     auto token = require_auth_token();
     if (!token.ok()) return token.error();
     return api::get_track_file_url_raw(*api_client_, base_url_,
