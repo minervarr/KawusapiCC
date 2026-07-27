@@ -30,6 +30,11 @@ ae::HttpClient::Options cdn_client_options(const std::string &ca_bundle_path) {
     ae::HttpClient::Options opts;
     opts.ca_bundle_path = ca_bundle_path;
     opts.connect_timeout_ms = 10000;
+    // Qobuz's CDN throttles per connection, not per client: a cold track
+    // serves at ~650 KB/s over one connection but ~3.4 MB/s across four ranges
+    // of that same file. Only the CDN client gets this — API responses are a
+    // few KB and segmenting them would cost a probe request for nothing.
+    opts.max_segments = 4;
     return opts;
 }
 

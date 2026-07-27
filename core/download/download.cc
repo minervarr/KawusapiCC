@@ -3,6 +3,8 @@
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
+#include <map>
+#include <mutex>
 #include <thread>
 
 #include "ae/log.hh"
@@ -175,7 +177,7 @@ Result<std::string> download_album_track(const QobuzApiService &service, int tra
 Result<void> embed_album_metadata(const QobuzApiService &service, const Album &album,
                                   const std::vector<int> &track_ids,
                                   const std::vector<std::string> &paths,
-                                  const MetadataConfig &config) {
+                                  const MetadataConfig &config, size_t concurrency) {
     std::optional<std::vector<uint8_t>> cover_data;
     if (config.is_enabled(MetadataField::CoverArt) && album.image) {
         if (auto url = best_cover_url(*album.image)) {
@@ -185,17 +187,53 @@ Result<void> embed_album_metadata(const QobuzApiService &service, const Album &a
         }
     }
 
-    for (size_t i = 0; i < track_ids.size() && i < paths.size(); ++i) {
-        auto track = service.get_track(track_ids[i]);
-        if (!track.ok()) return track.error();
+    // The album already carries its full track list (album/get returns the
+    // `tracks` array), so index it instead of spending one API round-trip per
+    // track — that was the bulk of the pause between the last byte landing and
+    // the album finishing.
+    std::map<int, const Track *> by_id;
+    if (album.tracks && album.tracks->items) {
+        for (const auto &t : *album.tracks->items) {
+            if (t && t->id) by_id.emplace(*t->id, t.get());
+        }
+    }
 
-        ComprehensiveMetadata meta =
-            extract_comprehensive_metadata(track.value(), &album, nullptr);
+    size_t count = std::min(track_ids.size(), paths.size());
+    std::mutex error_mutex;
+    std::optional<Error> first_error;
+
+    run_bounded(count, std::max<size_t>(concurrency, 1), [&](size_t i) {
+        {
+            std::lock_guard<std::mutex> lock(error_mutex);
+            if (first_error) return;
+        }
+
+        const Track *track = nullptr;
+        Result<Track> fetched = Track{};
+        auto it = by_id.find(track_ids[i]);
+        if (it != by_id.end()) {
+            track = it->second;
+        } else {
+            fetched = service.get_track(track_ids[i]);
+            if (!fetched.ok()) {
+                std::lock_guard<std::mutex> lock(error_mutex);
+                if (!first_error) first_error = fetched.error();
+                return;
+            }
+            track = &fetched.value();
+        }
+
+        ComprehensiveMetadata meta = extract_comprehensive_metadata(*track, &album, nullptr);
         meta.cover_art_data = cover_data;
 
         auto embedded = embed_metadata_in_file(paths[i], meta, config);
-        if (!embedded.ok()) return embedded.error();
-    }
+        if (!embedded.ok()) {
+            std::lock_guard<std::mutex> lock(error_mutex);
+            if (!first_error) first_error = embedded.error();
+        }
+    });
+
+    if (first_error) return *first_error;
     return {};
 }
 
@@ -290,7 +328,7 @@ Result<std::vector<std::string>> download_album(const QobuzApiService &service,
     const auto &track_ids = prepared.value().track_ids;
     const std::string &dir = prepared.value().dir;
 
-    size_t concurrency = static_cast<size_t>(options.concurrency.value_or(4));
+    size_t concurrency = static_cast<size_t>(options.concurrency.value_or(8));
     std::vector<std::optional<Result<std::string>>> results(track_ids.size());
 
     run_bounded(track_ids.size(), concurrency, [&](size_t idx) {
@@ -328,7 +366,7 @@ Result<std::vector<std::string>> download_album(const QobuzApiService &service,
 
     if (options.metadata) {
         auto embedded = embed_album_metadata(service, album.value(), downloaded_ids, paths,
-                                             *options.metadata);
+                                             *options.metadata, concurrency);
         if (!embedded.ok()) return embedded.error();
     }
 
@@ -364,7 +402,7 @@ Result<std::vector<std::string>> download_playlist(const QobuzApiService &servic
     }
     if (track_ids.empty()) return download_error("No tracks in playlist");
 
-    size_t concurrency = static_cast<size_t>(options.concurrency.value_or(4));
+    size_t concurrency = static_cast<size_t>(options.concurrency.value_or(8));
     std::vector<std::optional<Result<std::string>>> results(track_ids.size());
 
     run_bounded(track_ids.size(), concurrency, [&](size_t idx) {
