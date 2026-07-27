@@ -34,7 +34,14 @@ ae::HttpClient::Options cdn_client_options(const std::string &ca_bundle_path) {
     // serves at ~650 KB/s over one connection but ~3.4 MB/s across four ranges
     // of that same file. Only the CDN client gets this — API responses are a
     // few KB and segmenting them would cost a probe request for nothing.
-    opts.max_segments = 4;
+    //
+    // 8 is a request, not an allocation: HttpClient's global budget still caps
+    // total transfer sockets at 16, so four concurrent tracks get about four
+    // connections each, and an album down to its last track gets all eight
+    // instead of leaving the link idle. Measured scaling on cold files is
+    // 3.5 MB/s at 4 connections, 7.1 at 8, 10.3 at 16, 12.0 at 32 — 16 is the
+    // knee, which is where the budget sits.
+    opts.max_segments = 8;
     return opts;
 }
 
