@@ -55,6 +55,13 @@ void push_pagination_params(api::Params &params, std::optional<int> limit,
     if (offset) params.emplace_back("offset", std::to_string(*offset));
 }
 
+// Qobuz's reply when the app_secret no longer matches the app_id:
+// 400 "Invalid Request Signature parameter (request_sig)".
+bool is_signature_error(const Error &error) {
+    return error.code == ErrorCode::ApiErrorResponse && error.api_code == 400 &&
+           error.message.find("request_sig") != std::string::npos;
+}
+
 std::string trim_copy(const std::string &s) {
     size_t begin = s.find_first_not_of(" \t\r\n");
     if (begin == std::string::npos) return {};
@@ -71,20 +78,60 @@ Result<QobuzApiService> QobuzApiService::build_service(Config config) {
 
     QobuzApiService service;
     service.base_url_ = BASE_URL;
-    service.app_id_ = std::move(config.app_id);
-    service.app_secret_ = std::move(config.app_secret);
+    service.creds_ = std::make_shared<CredentialState>();
+    service.creds_->app_id = std::move(config.app_id);
+    service.creds_->app_secret = std::move(config.app_secret);
     service.ca_bundle_path_ = std::move(config.ca_bundle_path);
     service.env_path_ = std::move(config.env_path);
     service.rebuild_http_client();
     return service;
 }
 
+// Called on construction and after a refresh. The outgoing client is retired
+// rather than freed so references handed out by http_client() stay valid.
 void QobuzApiService::rebuild_http_client() {
-    api_client_ = std::make_shared<ae::HttpClient>(
-        api_client_options(app_id_, ca_bundle_path_));
+    {
+        std::lock_guard<std::mutex> lock(creds_->state_mutex);
+        if (creds_->api_client) creds_->retired_clients.push_back(creds_->api_client);
+        creds_->api_client = std::make_shared<ae::HttpClient>(
+            api_client_options(creds_->app_id, ca_bundle_path_));
+    }
     if (!cdn_client_) {
         cdn_client_ = std::make_shared<ae::HttpClient>(cdn_client_options(ca_bundle_path_));
     }
+}
+
+std::string QobuzApiService::app_id() const {
+    std::lock_guard<std::mutex> lock(creds_->state_mutex);
+    return creds_->app_id;
+}
+
+std::string QobuzApiService::app_secret() const {
+    std::lock_guard<std::mutex> lock(creds_->state_mutex);
+    return creds_->app_secret;
+}
+
+std::shared_ptr<ae::HttpClient> QobuzApiService::api_client() const {
+    std::lock_guard<std::mutex> lock(creds_->state_mutex);
+    return creds_->api_client;
+}
+
+const ae::HttpClient &QobuzApiService::http_client() const { return *api_client(); }
+
+std::uint32_t QobuzApiService::credentials_generation() const {
+    std::lock_guard<std::mutex> lock(creds_->state_mutex);
+    return creds_->generation;
+}
+
+api::RequestAuth QobuzApiService::request_auth(const std::string &token) const {
+    std::lock_guard<std::mutex> lock(creds_->state_mutex);
+    return api::RequestAuth{creds_->app_id, creds_->app_secret, token};
+}
+
+void QobuzApiService::set_credentials_listener(
+    std::function<void(const std::string &, const std::string &)> cb) {
+    std::lock_guard<std::mutex> lock(creds_->state_mutex);
+    creds_->listener = std::move(cb);
 }
 
 Result<QobuzApiService> QobuzApiService::with_credentials(Config config) {
@@ -139,8 +186,9 @@ Result<std::pair<std::string, int64_t>> QobuzApiService::login(const std::string
     std::string hashed = ae::md5_hex(password);
 
     api::Params params{{"email", email}, {"password", hashed}};
-    auto response = api::post<LoginResponse>(*api_client_, base_url_, "/user/login",
-                                             std::move(params), app_id_, "");
+    auto client = api_client();
+    auto response = api::post<LoginResponse>(*client, base_url_, "/user/login",
+                                             std::move(params), app_id(), "");
     if (!response.ok()) return response.error();
 
     if (!response.value().user_auth_token) {
@@ -159,8 +207,9 @@ Result<std::string> QobuzApiService::login_with_token(const std::string &user_id
     AE_LOGI("Attempting token login");
 
     api::Params params{{"user_id", user_id}, {"user_auth_token", auth_token}};
-    auto response = api::post<LoginResponse>(*api_client_, base_url_, "/user/login",
-                                             std::move(params), app_id_, "");
+    auto client = api_client();
+    auto response = api::post<LoginResponse>(*client, base_url_, "/user/login",
+                                             std::move(params), app_id(), "");
     if (!response.ok()) return response.error();
 
     const LoginResponse &login = response.value();
@@ -212,9 +261,20 @@ Result<void> QobuzApiService::authenticate_with_getter(
     return {};
 }
 
-Result<void> QobuzApiService::refresh_app_credentials() {
-    if (credentials_refreshed_) {
-        return credentials_error("Credentials can only be refreshed once per session");
+Result<void> QobuzApiService::refresh_credentials(
+    std::uint32_t seen_generation,
+    const std::function<bool(const ae::HttpClient &, const api::RequestAuth &)> &probe) const {
+    // Held across the scrape and the probes: a concurrent worker that hit the
+    // same signature failure waits here and then finds the generation already
+    // bumped, instead of fetching the ~9 MB bundle a second time.
+    std::lock_guard<std::mutex> refreshing(creds_->refresh_mutex);
+
+    {
+        std::lock_guard<std::mutex> lock(creds_->state_mutex);
+        if (creds_->generation != seen_generation) return {};
+        if (creds_->refreshed) {
+            return credentials_error("Credentials can only be refreshed once per session");
+        }
     }
 
     AE_LOGI("Refreshing app credentials from web player");
@@ -223,22 +283,70 @@ Result<void> QobuzApiService::refresh_app_credentials() {
     opts.ca_bundle_path = ca_bundle_path_;
     ae::HttpClient plain(opts);
 
-    auto extracted = extract_from_web_player(plain);
+    auto extracted = extract_all_from_web_player(plain);
     if (!extracted.ok()) return extracted.error();
 
+    const std::string &new_app_id = extracted.value().app_id;
+    const auto &candidates = extracted.value().app_secrets;
+
+    // The bundle ships one seed per timezone and the API accepts exactly one
+    // of them, so the candidates have to be tried against a real signed call.
+    std::string chosen;
+    if (!probe) {
+        chosen = candidates.front();
+    } else {
+        ae::HttpClient probe_client(api_client_options(new_app_id, ca_bundle_path_));
+        std::string token = user_auth_token_.value_or("");
+        for (const auto &candidate : candidates) {
+            if (probe(probe_client, api::RequestAuth{new_app_id, candidate, token})) {
+                chosen = candidate;
+                break;
+            }
+        }
+        if (chosen.empty()) {
+            return credentials_error("None of the " + std::to_string(candidates.size()) +
+                                     " app secrets in the web player bundle were accepted");
+        }
+    }
+
     if (!env_path_.empty()) {
-        auto saved = save_app_credentials(env_path_, extracted.value().first,
-                                          extracted.value().second);
+        auto saved = save_app_credentials(env_path_, new_app_id, chosen);
         if (!saved.ok()) return saved.error();
     }
 
-    app_id_ = extracted.value().first;
-    app_secret_ = extracted.value().second;
-    rebuild_http_client();
-    credentials_refreshed_ = true;
+    std::function<void(const std::string &, const std::string &)> listener;
+    {
+        std::lock_guard<std::mutex> lock(creds_->state_mutex);
+        creds_->app_id = new_app_id;
+        creds_->app_secret = chosen;
+        creds_->retired_clients.push_back(creds_->api_client);
+        creds_->api_client = std::make_shared<ae::HttpClient>(
+            api_client_options(new_app_id, ca_bundle_path_));
+        ++creds_->generation;
+        creds_->refreshed = true;
+        listener = creds_->listener;
+    }
 
     AE_LOGI("App credentials refreshed successfully");
+    // Outside the locks: the listener writes config.toml, and must not be
+    // able to re-enter the service while it holds them.
+    if (listener) listener(new_app_id, chosen);
     return {};
+}
+
+Result<void> QobuzApiService::refresh_app_credentials() {
+    return refresh_credentials(credentials_generation(), nullptr);
+}
+
+Result<void> QobuzApiService::refresh_app_credentials(std::int64_t probe_track_id,
+                                                      int probe_format_id) {
+    return refresh_credentials(
+        credentials_generation(),
+        [&](const ae::HttpClient &client, const api::RequestAuth &auth) {
+            return api::get_track_file_url_raw(client, base_url_, auth, probe_track_id,
+                                               probe_format_id)
+                .ok();
+        });
 }
 
 // --- Request helpers (content/mod.rs)
@@ -247,7 +355,8 @@ Result<std::string> QobuzApiService::do_signed_get_raw(const std::string &endpoi
                                                        api::Params params) const {
     auto token = require_auth_token();
     if (!token.ok()) return token.error();
-    return api::signed_get_raw(*api_client_, base_url_, endpoint, std::move(params),
+    auto client = api_client();
+    return api::signed_get_raw(*client, base_url_, endpoint, std::move(params),
                                request_auth(token.value()));
 }
 
@@ -378,7 +487,8 @@ Result<void> QobuzApiService::modify_favorites(const std::vector<int> &item_ids,
     }
 
     api::Params params{{"item_ids", ids}, {"item_type", item_type}};
-    auto raw = api::signed_post_raw(*api_client_, base_url_, endpoint, std::move(params),
+    auto client = api_client();
+    auto raw = api::signed_post_raw(*client, base_url_, endpoint, std::move(params),
                                     request_auth(token.value()));
     if (!raw.ok()) return raw.error();
     return {};
@@ -416,8 +526,35 @@ Result<FileUrl> QobuzApiService::get_track_file_url(std::int64_t track_id,
                                                     int format_id) const {
     auto token = require_auth_token();
     if (!token.ok()) return token.error();
-    return api::get_track_file_url_raw(*api_client_, base_url_,
-                                       request_auth(token.value()), track_id, format_id);
+
+    auto attempt = [&] {
+        auto client = api_client();
+        return api::get_track_file_url_raw(*client, base_url_, request_auth(token.value()),
+                                           track_id, format_id);
+    };
+
+    // getFileUrl is the only endpoint whose signature Qobuz actually
+    // validates, so a rotated app_secret surfaces here first — and nowhere
+    // else. Heal it in place: re-scrape the web player and probe the
+    // candidate secrets with this very request, so the winner is the one that
+    // makes the call the caller wanted succeed.
+    std::uint32_t generation = credentials_generation();
+    auto result = attempt();
+    if (result.ok() || !is_signature_error(result.error())) return result;
+
+    AE_LOGW("track %lld: app_secret rejected, attempting credential refresh",
+            static_cast<long long>(track_id));
+    auto healed = refresh_credentials(
+        generation, [&](const ae::HttpClient &client, const api::RequestAuth &auth) {
+            return api::get_track_file_url_raw(client, base_url_, auth, track_id, format_id)
+                .ok();
+        });
+    // Report the signature failure, not whatever went wrong while healing.
+    if (!healed.ok()) {
+        AE_LOGE("credential refresh failed: %s", healed.error().message.c_str());
+        return result;
+    }
+    return attempt();
 }
 
 } // namespace kb

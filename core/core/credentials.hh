@@ -28,8 +28,22 @@ Result<void> save_app_credentials(const std::string &env_path, const std::string
 Result<std::vector<std::pair<std::string, std::string>>> parse_env_file(
     const std::string &env_path);
 
-// Extracts (app_id, app_secret) from the Qobuz web player JS bundle.
-// `http` must be a plain client ("Mozilla/5.0" user agent, no API headers).
+// App id plus every secret candidate the bundle yields. The bundle ships one
+// seed per timezone and only one of them is accepted by the API, so callers
+// must probe the candidates against a signed endpoint rather than trusting
+// the first entry.
+struct WebPlayerCredentials {
+    std::string app_id;
+    std::vector<std::string> app_secrets;
+};
+
+// Extracts the app id and all decodable secret candidates from the Qobuz web
+// player JS bundle. `http` must be a plain client ("Mozilla/5.0" user agent,
+// no API headers).
+Result<WebPlayerCredentials> extract_all_from_web_player(const ae::HttpClient &http);
+
+// extract_all_from_web_player narrowed to the first secret candidate. Only
+// safe where the result is validated (or discarded) downstream.
 Result<std::pair<std::string, std::string>> extract_from_web_player(
     const ae::HttpClient &http);
 
@@ -37,6 +51,10 @@ namespace detail {
 // Exposed for testing; mirror the Rust helpers.
 Result<std::string> extract_bundle_url(const std::string &html);
 Result<std::string> extract_app_id_from_bundle(const std::string &js);
+// Every seed/timezone pair in the bundle, decoded, in bundle order.
+// Candidates whose timezone object is missing or whose payload fails to
+// base64-decode are skipped; only an empty result is an error.
+Result<std::vector<std::string>> extract_app_secrets_from_bundle(const std::string &js);
 Result<std::string> extract_app_secret_from_bundle(const std::string &js);
 std::string capitalize_first_letter(const std::string &s);
 } // namespace detail

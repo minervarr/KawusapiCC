@@ -3,6 +3,7 @@
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <regex>
 #include <sstream>
 
@@ -160,48 +161,68 @@ Result<std::string> extract_app_id_from_bundle(const std::string &js) {
     return m[1].str();
 }
 
-Result<std::string> extract_app_secret_from_bundle(const std::string &js) {
-    // \):[a-z]\.initialSeed\("(seed)",window\.utimezone\.(timezone)\)
+Result<std::vector<std::string>> extract_app_secrets_from_bundle(const std::string &js) {
+    // [a-z]\.initialSeed\("(seed)",window\.utimezone\.(timezone)\)
+    //
+    // Deliberately unanchored: the bundle carries one seed per timezone
+    // (three at the time of writing) and which of them a minifier happens to
+    // emit first is incidental, so every match has to become a candidate.
     static const std::regex seed_tz_re(
-        R"re(\):[a-z]\.initialSeed\("(.*?)",window\.utimezone\.([a-z]+)\))re");
-    std::smatch m;
-    if (!std::regex_search(js, m, seed_tz_re)) {
-        return credentials_error("Could not find seed and timezone in bundle JavaScript");
-    }
-    std::string seed = m[1].str();
-    std::string timezone = m[2].str();
-
-    std::string title_case = capitalize_first_letter(timezone);
-    std::regex info_extras_re("name:\"[^\"]*/" + title_case + "\"[^}]*");
-    std::smatch tz_match;
-    if (!std::regex_search(js, tz_match, info_extras_re)) {
-        return credentials_error("Could not find timezone object with info and extras");
-    }
-    std::string tz_object = tz_match[0].str();
-
-    std::string info, extras;
+        R"re([a-z]\.initialSeed\("([\w=]+)",window\.utimezone\.([a-z]+)\))re");
     static const std::regex info_re(R"re(info:"([^"]*)")re");
     static const std::regex extras_re(R"re(extras:"([^"]*)")re");
-    std::smatch im, em;
-    if (std::regex_search(tz_object, im, info_re)) info = im[1].str();
-    if (std::regex_search(tz_object, em, extras_re)) extras = em[1].str();
 
-    std::string encoded = seed + info + extras;
-    if (encoded.size() <= 44) {
-        return credentials_error("Concatenated seed+info+extras too short to decode");
-    }
-    encoded.resize(encoded.size() - 44);
+    // Ordering heuristic, not a filter. The seed the API actually accepts has
+    // so far always been the one whose initialSeed call is preceded by "):",
+    // and callers that cannot probe (QobuzApiService::create(), which has no
+    // user token yet) have to commit to a guess. Ranking those first keeps
+    // that bootstrap guess right while still surfacing every candidate for
+    // the paths that can validate — which is where the real guarantee lives,
+    // since the prefix is an artifact of whatever the minifier emitted.
+    std::vector<std::string> preferred, rest;
+    for (std::sregex_iterator it(js.begin(), js.end(), seed_tz_re), end; it != end; ++it) {
+        std::string seed = (*it)[1].str();
+        std::string timezone = (*it)[2].str();
+        auto offset = static_cast<size_t>(it->position(0));
+        bool anchored = offset >= 2 && js.compare(offset - 2, 2, "):") == 0;
 
-    auto decoded = ae::base64_decode(encoded);
-    if (!decoded) {
-        return credentials_error("Failed to base64-decode app secret");
+        std::regex info_extras_re("name:\"[^\"]*/" + capitalize_first_letter(timezone) +
+                                  "\"[^}]*");
+        std::smatch tz_match;
+        if (!std::regex_search(js, tz_match, info_extras_re)) continue;
+        std::string tz_object = tz_match[0].str();
+
+        std::string info, extras;
+        std::smatch im, em;
+        if (std::regex_search(tz_object, im, info_re)) info = im[1].str();
+        if (std::regex_search(tz_object, em, extras_re)) extras = em[1].str();
+
+        std::string encoded = seed + info + extras;
+        if (encoded.size() <= 44) continue;
+        encoded.resize(encoded.size() - 44);
+
+        auto decoded = ae::base64_decode(encoded);
+        if (!decoded) continue;
+        (anchored ? preferred : rest).push_back(std::move(*decoded));
     }
-    return *decoded;
+
+    if (preferred.empty() && rest.empty()) {
+        return credentials_error("Could not decode any app secret from bundle JavaScript");
+    }
+    preferred.insert(preferred.end(), std::make_move_iterator(rest.begin()),
+                     std::make_move_iterator(rest.end()));
+    return preferred;
+}
+
+Result<std::string> extract_app_secret_from_bundle(const std::string &js) {
+    auto secrets = extract_app_secrets_from_bundle(js);
+    if (!secrets.ok()) return secrets.error();
+    return secrets.value().front();
 }
 
 } // namespace detail
 
-Result<std::pair<std::string, std::string>> extract_from_web_player(const ae::HttpClient &http) {
+Result<WebPlayerCredentials> extract_all_from_web_player(const ae::HttpClient &http) {
     auto login_page = http.get("https://play.qobuz.com/login");
     if (!login_page.ok()) return from_engine(login_page.error());
 
@@ -214,10 +235,20 @@ Result<std::pair<std::string, std::string>> extract_from_web_player(const ae::Ht
     auto app_id = detail::extract_app_id_from_bundle(bundle_js.value().body);
     if (!app_id.ok()) return app_id.error();
 
-    auto app_secret = detail::extract_app_secret_from_bundle(bundle_js.value().body);
-    if (!app_secret.ok()) return app_secret.error();
+    auto app_secrets = detail::extract_app_secrets_from_bundle(bundle_js.value().body);
+    if (!app_secrets.ok()) return app_secrets.error();
 
-    return std::make_pair(app_id.take(), app_secret.take());
+    WebPlayerCredentials creds;
+    creds.app_id = app_id.take();
+    creds.app_secrets = app_secrets.take();
+    return creds;
+}
+
+Result<std::pair<std::string, std::string>> extract_from_web_player(const ae::HttpClient &http) {
+    auto creds = extract_all_from_web_player(http);
+    if (!creds.ok()) return creds.error();
+    return std::make_pair(std::move(creds.value().app_id),
+                          std::move(creds.value().app_secrets.front()));
 }
 
 } // namespace kb
