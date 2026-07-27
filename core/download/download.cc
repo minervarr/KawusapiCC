@@ -6,7 +6,6 @@
 #include <thread>
 
 #include "ae/log.hh"
-#include "ae/sanitize.hh"
 #include "../metadata/embedder.hh"
 #include "../metadata/extractor.hh"
 
@@ -33,10 +32,15 @@ Result<void> create_dir_all(const std::string &dir) {
     return {};
 }
 
-std::string two_digit(int value) {
-    char buf[16];
-    std::snprintf(buf, sizeof(buf), "%02d", value);
-    return buf;
+// Track files are addressed by Qobuz ID, never by title — real names live in
+// the host's catalog, so no filesystem's reserved-character rules can ever
+// mangle them. The format id is part of the name on purpose: without it,
+// re-downloading a flac-16 album as flac-24 reuses the same ".flac" path and
+// detect_partial_file() would mistake the finished file for a partial and
+// resume onto it, silently corrupting it.
+std::string track_file_name(int track_id, int format_id) {
+    return std::to_string(track_id) + "." + std::to_string(format_id) + "." +
+           Album::extension_for_format(format_id);
 }
 
 // Cover art fetch (download_io.rs fetch_track_cover / album_download.rs
@@ -101,57 +105,19 @@ void run_bounded(size_t count, size_t concurrency, Fn fn) {
     for (auto &t : workers) t.join();
 }
 
-// album_download.rs quality_tag
-std::string quality_tag(int format_id, const Album &album) {
-    if (format_id == quality::MP3_320) return "(320kbps)";
-
-    int ceil_depth = 16;
-    double ceil_rate = 44.1;
-    if (format_id == quality::FLAC_24_192) {
-        ceil_depth = 24;
-        ceil_rate = 192.0;
-    } else if (format_id == quality::FLAC_24_96) {
-        ceil_depth = 24;
-        ceil_rate = 96.0;
-    }
-
-    int depth = album.maximum_bit_depth ? std::min(*album.maximum_bit_depth, ceil_depth)
-                                        : ceil_depth;
-    double rate = album.maximum_sampling_rate
-                      ? std::min(*album.maximum_sampling_rate, ceil_rate)
-                      : ceil_rate;
-
-    std::string rate_str;
-    if (rate == static_cast<int>(rate)) {
-        rate_str = std::to_string(static_cast<int>(rate));
-    } else {
-        char buf[32];
-        std::snprintf(buf, sizeof(buf), "%g", rate);
-        rate_str = buf;
-    }
-    return "(" + std::to_string(depth) + "-" + rate_str + ")";
-}
-
 struct AlbumDirectory {
     std::vector<int> track_ids;
     std::string dir;
 };
 
-Result<AlbumDirectory> prepare_album_directory(const Album &album, int format_id,
+// "{output_dir}/{album_id}". Flat and ID-addressed: the directory name is
+// stable even when a title is corrected upstream, and it survives every
+// filesystem regardless of what characters the real title contains.
+Result<AlbumDirectory> prepare_album_directory(const Album &album,
+                                               const std::string &album_id,
                                                const std::string &output_dir) {
-    std::string artist_name =
-        (album.artist && album.artist->name) ? *album.artist->name : "Unknown Artist";
-
-    std::string album_display = album.title.value_or("Unknown Album");
-    if (album.version && !album.version->empty()) {
-        album_display += " (" + *album.version + ")";
-    }
-    std::string folder_name =
-        ae::sanitize_filename(album_display) + " " + quality_tag(format_id, album);
-
-    std::string dir = (fs::u8path(output_dir) / fs::u8path(ae::sanitize_filename(artist_name)) /
-                       fs::u8path(folder_name))
-                          .u8string();
+    std::string dir =
+        (fs::u8path(output_dir) / fs::u8path(album.id.value_or(album_id))).u8string();
     auto created = create_dir_all(dir);
     if (!created.ok()) return created.error();
 
@@ -162,9 +128,7 @@ Result<AlbumDirectory> prepare_album_directory(const Album &album, int format_id
 }
 
 std::string album_track_path(const std::string &dir, int track_id, int format_id) {
-    std::string filename =
-        two_digit(track_id) + "." + Album::extension_for_format(format_id);
-    return (fs::u8path(dir) / fs::u8path(filename)).u8string();
+    return (fs::u8path(dir) / fs::u8path(track_file_name(track_id, format_id))).u8string();
 }
 
 // Album per-track worker (album_download.rs download_album_tracks task body).
@@ -256,15 +220,18 @@ Result<std::string> download_track(const QobuzApiService &service, int track_id,
     cancel_check = check_cancel(options.cancel);
     if (!cancel_check.ok()) return cancel_check.error();
 
-    const char *ext = Album::extension_for_format(format_id);
-    int track_num = track.value().track_number.value_or(track_id);
-    std::string title = track.value().title.value_or("Unknown");
-    std::string safe_name = ae::sanitize_filename(two_digit(track_num) + ". " + title);
-    std::string filename = safe_name + "." + ext;
+    // Same ID-addressed layout an album download produces, so pulling a single
+    // track and later its whole album lands on one file rather than two.
+    const Album *track_album = track.value().album.get();
+    std::string dir = output_dir;
+    if (track_album && track_album->id) {
+        dir = (fs::u8path(output_dir) / fs::u8path(*track_album->id)).u8string();
+    }
 
-    auto created = create_dir_all(output_dir);
+    auto created = create_dir_all(dir);
     if (!created.ok()) return created.error();
-    std::string path = (fs::u8path(output_dir) / fs::u8path(filename)).u8string();
+    std::string path =
+        (fs::u8path(dir) / fs::u8path(track_file_name(track_id, format_id))).u8string();
 
     for (uint32_t attempt = 0; attempt <= MAX_DOWNLOAD_RETRIES; ++attempt) {
         cancel_check = check_cancel(options.cancel);
@@ -292,9 +259,8 @@ Result<std::string> download_track(const QobuzApiService &service, int track_id,
         auto token = service.require_auth_token();
         if (!token.ok()) return token.error();
 
-        const Album *album_info = track.value().album.get();
         ComprehensiveMetadata meta =
-            extract_comprehensive_metadata(track.value(), album_info, nullptr);
+            extract_comprehensive_metadata(track.value(), track_album, nullptr);
         if (meta.cover_art_url) {
             meta.cover_art_data = fetch_cover_bytes(service, *meta.cover_art_url,
                                                     token.value());
@@ -319,7 +285,7 @@ Result<std::vector<std::string>> download_album(const QobuzApiService &service,
     cancel_check = check_cancel(options.cancel);
     if (!cancel_check.ok()) return cancel_check.error();
 
-    auto prepared = prepare_album_directory(album.value(), format_id, output_dir);
+    auto prepared = prepare_album_directory(album.value(), album_id, output_dir);
     if (!prepared.ok()) return prepared.error();
     const auto &track_ids = prepared.value().track_ids;
     const std::string &dir = prepared.value().dir;
@@ -383,11 +349,12 @@ Result<std::vector<std::string>> download_playlist(const QobuzApiService &servic
     cancel_check = check_cancel(options.cancel);
     if (!cancel_check.ok()) return cancel_check.error();
 
-    std::string title = playlist.value().name.value_or("Unknown Playlist");
-    std::string dir =
-        (fs::u8path(output_dir) / fs::u8path(ae::sanitize_filename(title))).u8string();
-    auto created = create_dir_all(dir);
+    // No playlist directory: download_track files each track under its own
+    // album id, so a track on three playlists is stored once instead of three
+    // times. Playlist membership is the catalog's job, not the filesystem's.
+    auto created = create_dir_all(output_dir);
     if (!created.ok()) return created.error();
+    const std::string &dir = output_dir;
 
     std::vector<int> track_ids;
     if (playlist.value().tracks && playlist.value().tracks->items) {

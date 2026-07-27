@@ -38,21 +38,30 @@ struct DownloadOptions {
 // `Some(size)` when a non-empty partial file exists at path.
 std::optional<uint64_t> detect_partial_file(const std::string &path);
 
-// Downloads one track to `output_dir` as "NN. Title.ext" with Range-resume
+// Everything below is ID-addressed: albums are directories named by Qobuz
+// album id, tracks are files named "{track_id}.{format_id}.{ext}". No title
+// ever reaches a path, so no filesystem's reserved-character rules can mangle
+// one and paths stay stable when upstream metadata is corrected. Mapping an id
+// back to its real name is the host catalog's job.
+
+// Downloads one track to "{output_dir}/{album_id}/{track_id}.{fmt}.{ext}"
+// (directly under output_dir when the track has no album) with Range-resume
 // and retry; embeds metadata when configured. Returns the file path.
 Result<std::string> download_track(const QobuzApiService &service, int track_id,
                                    int format_id, const std::string &output_dir,
                                    const DownloadOptions &options = {});
 
-// Downloads a whole album into "{output_dir}/{artist}/{album (quality)}/",
-// tracks named "ID.ext", with bounded concurrency. One track failing does
-// not abort the rest; fails only when every track failed.
+// Downloads a whole album into "{output_dir}/{album_id}/" with bounded
+// concurrency. One track failing does not abort the rest; fails only when
+// every track failed.
 Result<std::vector<std::string>> download_album(const QobuzApiService &service,
                                                 const std::string &album_id, int format_id,
                                                 const std::string &output_dir,
                                                 const DownloadOptions &options = {});
 
-// Downloads playlist tracks into "{output_dir}/{playlist name}/".
+// Downloads playlist tracks, each filed under its own album id — a track on
+// several playlists is stored once. Playlist membership belongs in the
+// catalog, not in a directory of copies.
 Result<std::vector<std::string>> download_playlist(const QobuzApiService &service,
                                                    const std::string &playlist_id,
                                                    int format_id,
