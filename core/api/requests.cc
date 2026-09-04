@@ -72,7 +72,7 @@ void append_signature(Params &params, const std::string &method, const std::stri
 
 // GET with X-User-Auth-Token, throttled, retrying on 429 with exponential
 // backoff. Transport errors are returned immediately.
-Result<ae::HttpResponse> retry_with_backoff(const ae::HttpClient &client,
+Result<arc::HttpResponse> retry_with_backoff(const arc::HttpClient &client,
                                             const std::string &url,
                                             const std::string &user_auth_token) {
     throttle();
@@ -97,7 +97,7 @@ Result<ae::HttpResponse> retry_with_backoff(const ae::HttpClient &client,
     return last_error ? *last_error : rate_limit_error("retries exhausted");
 }
 
-Result<std::string> execute_post(const ae::HttpClient &client, const std::string &base_url,
+Result<std::string> execute_post(const arc::HttpClient &client, const std::string &base_url,
                                  const std::string &endpoint, const Params &params) {
     auto response = client.post_form(base_url + endpoint, params);
     if (!response.ok()) return from_engine(response.error());
@@ -139,7 +139,7 @@ std::string build_url_with_params(const std::string &base_url, const std::string
     return url;
 }
 
-Result<std::string> handle_response(const ae::HttpResponse &response,
+Result<std::string> handle_response(const arc::HttpResponse &response,
                                     const std::string &endpoint) {
     long status = response.status;
     const std::string &body = response.body;
@@ -165,7 +165,7 @@ Result<std::string> handle_response(const ae::HttpResponse &response,
                               std::to_string(status));
 }
 
-Result<std::string> signed_get_raw(const ae::HttpClient &client, const std::string &base_url,
+Result<std::string> signed_get_raw(const arc::HttpClient &client, const std::string &base_url,
                                    const std::string &endpoint, Params params,
                                    const RequestAuth &auth) {
     append_signature(params, "GET", endpoint, auth);
@@ -177,7 +177,7 @@ Result<std::string> signed_get_raw(const ae::HttpClient &client, const std::stri
     return handle_response(response.value(), endpoint);
 }
 
-Result<std::string> post_raw(const ae::HttpClient &client, const std::string &base_url,
+Result<std::string> post_raw(const arc::HttpClient &client, const std::string &base_url,
                              const std::string &endpoint, Params params,
                              const std::string &app_id, const std::string &user_auth_token) {
     params.emplace_back("app_id", app_id);
@@ -187,7 +187,7 @@ Result<std::string> post_raw(const ae::HttpClient &client, const std::string &ba
     return execute_post(client, base_url, endpoint, params);
 }
 
-Result<std::string> signed_post_raw(const ae::HttpClient &client, const std::string &base_url,
+Result<std::string> signed_post_raw(const arc::HttpClient &client, const std::string &base_url,
                                     const std::string &endpoint, Params params,
                                     const RequestAuth &auth) {
     params.emplace_back("user_auth_token", auth.user_auth_token);
@@ -195,7 +195,7 @@ Result<std::string> signed_post_raw(const ae::HttpClient &client, const std::str
     return execute_post(client, base_url, endpoint, params);
 }
 
-Result<FileUrl> get_track_file_url_raw(const ae::HttpClient &client,
+Result<FileUrl> get_track_file_url_raw(const arc::HttpClient &client,
                                        const std::string &base_url, const RequestAuth &auth,
                                        std::int64_t track_id, int format_id) {
     std::string ts = timestamp();

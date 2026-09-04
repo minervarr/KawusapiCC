@@ -17,14 +17,14 @@ kobuzapi/                  Android library module (com.android.library)
     third_party/nlohmann/  vendored nlohmann/json 3.11.3
   src/main/assets/cacert.pem   Mozilla CA bundle for libcurl TLS verification
 engine/archive_engine/     reusable native engine (git submodule)
-    util/  ae_util         md5, base64, filename sanitization, Result<T>
-    net/   ae_net          libcurl + mbedTLS HTTP client and downloader
-    tag/   ae_tag          TagLib 2 tagging facade (FLAC / MP3, cover art)
-    archive/ ae_archive    libarchive extract/compress (off in this project)
+    util/  arc_util         md5, base64, filename sanitization, Result<T>
+    net/   arc_net          libcurl + mbedTLS HTTP client and downloader
+    tag/   arc_tag          TagLib 2 tagging facade (FLAC / MP3, cover art)
+    archive/ arc_archive    libarchive extract/compress (off in this project)
 ```
 
-The engine modules are option-gated (`AE_BUILD_NET`, `AE_BUILD_TAG`, `AE_BUILD_ARCHIVE`,
-`AE_BUILD_JNI`) so other projects can consume only what they need via
+The engine modules are option-gated (`ARC_BUILD_NET`, `ARC_BUILD_TAG`, `ARC_BUILD_ARCHIVE`,
+`ARC_BUILD_JNI`) so other projects can consume only what they need via
 `add_subdirectory`.
 
 ## Building

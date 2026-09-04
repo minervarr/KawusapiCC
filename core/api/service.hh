@@ -13,7 +13,7 @@
 #include <utility>
 #include <vector>
 
-#include "ae/http.hh"
+#include "arc/http.hh"
 #include "../core/errors.hh"
 #include "../core/models.hh"
 #include "requests.hh"
@@ -37,12 +37,12 @@ struct CredentialState {
 
     std::string app_id;
     std::string app_secret;
-    std::shared_ptr<ae::HttpClient> api_client;
+    std::shared_ptr<arc::HttpClient> api_client;
     // Clients replaced by a refresh are kept alive rather than freed, so the
     // reference handed out by http_client() stays valid for a thread still
     // inside a request when the swap lands. Bounded by the once-per-session
     // refresh guard.
-    std::vector<std::shared_ptr<ae::HttpClient>> retired_clients;
+    std::vector<std::shared_ptr<arc::HttpClient>> retired_clients;
 
     // Bumped on each successful refresh. A caller that observed a stale
     // generation knows someone else already healed the credentials.
@@ -160,9 +160,9 @@ public:
 
     // API client (x-app-id header, browser UA). The referent outlives any
     // refresh — see CredentialState::retired_clients.
-    const ae::HttpClient &http_client() const;
+    const arc::HttpClient &http_client() const;
     // Minimal CDN client (no API headers, avoids confusing CDN edges).
-    const ae::HttpClient &cdn_client() const { return *cdn_client_; }
+    const arc::HttpClient &cdn_client() const { return *cdn_client_; }
 
     api::RequestAuth request_auth(const std::string &token) const;
 
@@ -173,7 +173,7 @@ private:
     void rebuild_http_client();
 
     // Locked snapshots of the shared credential state.
-    std::shared_ptr<ae::HttpClient> api_client() const;
+    std::shared_ptr<arc::HttpClient> api_client() const;
     std::uint32_t credentials_generation() const;
 
     // Re-scrapes the web player and adopts the first candidate secret that
@@ -183,7 +183,7 @@ private:
     // success.
     Result<void> refresh_credentials(
         std::uint32_t seen_generation,
-        const std::function<bool(const ae::HttpClient &, const api::RequestAuth &)> &probe)
+        const std::function<bool(const arc::HttpClient &, const api::RequestAuth &)> &probe)
         const;
 
     // Helpers mirroring content/mod.rs.
@@ -211,10 +211,10 @@ private:
     std::string env_path_;
     std::optional<std::string> user_auth_token_;
     // App credentials and the client carrying them; shared so a refresh
-    // through a const& is seen by every holder. ae::HttpClient itself is
+    // through a const& is seen by every holder. arc::HttpClient itself is
     // thread-safe per request.
     std::shared_ptr<CredentialState> creds_;
-    std::shared_ptr<ae::HttpClient> cdn_client_;
+    std::shared_ptr<arc::HttpClient> cdn_client_;
 };
 
 } // namespace kb

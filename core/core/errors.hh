@@ -7,7 +7,7 @@
 #include <string>
 #include <utility>
 
-#include "ae/result.hh"
+#include "arc/result.hh"
 
 namespace kb {
 
@@ -92,11 +92,11 @@ inline Error canceled_error() {
 }
 
 // Maps an engine transport/file error into the domain error space.
-Error from_engine(const ae::Error &e);
+Error from_engine(const arc::Error &e);
 
 inline bool is_retryable_network_error(const Error &e) { return e.retryable_network; }
 
-// Same shape as ae::Result but carrying the domain Error.
+// Same shape as arc::Result but carrying the domain Error.
 template <typename T>
 class Result {
 public:

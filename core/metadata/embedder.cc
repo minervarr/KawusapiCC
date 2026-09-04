@@ -5,7 +5,7 @@
 #include <cstdio>
 #include <set>
 
-#include "ae/tag.hh"
+#include "arc/tag.hh"
 #include "performers.hh"
 
 namespace kb {
@@ -45,13 +45,13 @@ std::string join(const std::vector<std::string> &v, const std::string &sep) {
     return out;
 }
 
-void push(ae::TagData &tags, const char *key, std::string value) {
+void push(arc::TagData &tags, const char *key, std::string value) {
     tags.fields.emplace_back(key, std::move(value));
 }
 
 // --- basic_fields.rs
 
-void apply_title(ae::TagData &tags, const ComprehensiveMetadata &meta,
+void apply_title(arc::TagData &tags, const ComprehensiveMetadata &meta,
                  const MetadataConfig &config) {
     if (!config.is_enabled(MetadataField::Title) || !meta.title) return;
     std::string full = *meta.title;
@@ -61,7 +61,7 @@ void apply_title(ae::TagData &tags, const ComprehensiveMetadata &meta,
     push(tags, "TITLE", std::move(full));
 }
 
-void apply_album(ae::TagData &tags, const ComprehensiveMetadata &meta,
+void apply_album(arc::TagData &tags, const ComprehensiveMetadata &meta,
                  const MetadataConfig &config) {
     if (!config.is_enabled(MetadataField::Album) || !meta.album) return;
     std::string full = *meta.album;
@@ -71,19 +71,19 @@ void apply_album(ae::TagData &tags, const ComprehensiveMetadata &meta,
     push(tags, "ALBUM", std::move(full));
 }
 
-void apply_label(ae::TagData &tags, const ComprehensiveMetadata &meta,
+void apply_label(arc::TagData &tags, const ComprehensiveMetadata &meta,
                  const MetadataConfig &config) {
     if (!config.is_enabled(MetadataField::Label) || !meta.label) return;
     push(tags, "LABEL", *meta.label);
 }
 
-void apply_genre(ae::TagData &tags, const ComprehensiveMetadata &meta,
+void apply_genre(arc::TagData &tags, const ComprehensiveMetadata &meta,
                  const MetadataConfig &config) {
     if (!config.is_enabled(MetadataField::Genre) || !meta.genre) return;
     push(tags, "GENRE", *meta.genre);
 }
 
-void apply_track_numbers(ae::TagData &tags, const ComprehensiveMetadata &meta,
+void apply_track_numbers(arc::TagData &tags, const ComprehensiveMetadata &meta,
                          const MetadataConfig &config) {
     if (config.is_enabled(MetadataField::TrackNumber) && meta.track_number) {
         push(tags, "TRACKNUMBER", std::to_string(*meta.track_number));
@@ -93,7 +93,7 @@ void apply_track_numbers(ae::TagData &tags, const ComprehensiveMetadata &meta,
     }
 }
 
-void apply_disc_numbers(ae::TagData &tags, const ComprehensiveMetadata &meta,
+void apply_disc_numbers(arc::TagData &tags, const ComprehensiveMetadata &meta,
                         const MetadataConfig &config) {
     if (config.is_enabled(MetadataField::DiscNumber) && meta.disc_number) {
         push(tags, "DISCNUMBER", std::to_string(*meta.disc_number));
@@ -103,13 +103,13 @@ void apply_disc_numbers(ae::TagData &tags, const ComprehensiveMetadata &meta,
     }
 }
 
-void apply_copyright(ae::TagData &tags, const ComprehensiveMetadata &meta,
+void apply_copyright(arc::TagData &tags, const ComprehensiveMetadata &meta,
                      const MetadataConfig &config) {
     if (!config.is_enabled(MetadataField::Copyright) || !meta.copyright) return;
     push(tags, "COPYRIGHT", *meta.copyright);
 }
 
-void apply_isrc(ae::TagData &tags, const ComprehensiveMetadata &meta,
+void apply_isrc(arc::TagData &tags, const ComprehensiveMetadata &meta,
                 const MetadataConfig &config) {
     if (!config.is_enabled(MetadataField::Isrc) || !meta.isrc) return;
     push(tags, "ISRC", *meta.isrc);
@@ -160,7 +160,7 @@ std::pair<std::optional<std::string>, std::optional<unsigned>> determine_primary
 
 // FLAC: YEAR + DATE. MP3: DATE (TDRC) carries the year, RELEASEDATE (TDRL)
 // the full date — mirroring the lofty ItemKey selection.
-void apply_dates(ae::TagData &tags, const ComprehensiveMetadata &meta,
+void apply_dates(arc::TagData &tags, const ComprehensiveMetadata &meta,
                  const MetadataConfig &config, bool is_flac) {
     auto [date_full, year] = determine_primary_date(meta);
     if (config.is_enabled(MetadataField::ReleaseYear) && year) {
@@ -188,7 +188,7 @@ std::string normalize_qobuz_url(const std::string &url) {
     return full;
 }
 
-void apply_url(ae::TagData &tags, const ComprehensiveMetadata &meta,
+void apply_url(arc::TagData &tags, const ComprehensiveMetadata &meta,
                const MetadataConfig &config, bool is_flac) {
     if (!config.is_enabled(MetadataField::Url) || !meta.product_url) return;
     // FLAC gets the custom URL key (apply_flac_custom_keys); MP3 gets a
@@ -198,7 +198,7 @@ void apply_url(ae::TagData &tags, const ComprehensiveMetadata &meta,
     }
 }
 
-void apply_media_type(ae::TagData &tags, const ComprehensiveMetadata &meta,
+void apply_media_type(arc::TagData &tags, const ComprehensiveMetadata &meta,
                       const MetadataConfig &config) {
     if (!config.is_enabled(MetadataField::MediaType)) return;
     const std::optional<std::string> &media =
@@ -206,7 +206,7 @@ void apply_media_type(ae::TagData &tags, const ComprehensiveMetadata &meta,
     if (media) push(tags, "MEDIA", *media);
 }
 
-void apply_flac_custom_keys(ae::TagData &tags, const ComprehensiveMetadata &meta,
+void apply_flac_custom_keys(arc::TagData &tags, const ComprehensiveMetadata &meta,
                             const MetadataConfig &config) {
     if (config.is_enabled(MetadataField::InvolvedPeople) && meta.performers &&
         !meta.performers->empty()) {
@@ -258,14 +258,14 @@ std::string build_mp3_album_artist(const ComprehensiveMetadata &meta) {
     return join(main, "/");
 }
 
-void apply_album_artist(ae::TagData &tags, const ComprehensiveMetadata &meta,
+void apply_album_artist(arc::TagData &tags, const ComprehensiveMetadata &meta,
                         const MetadataConfig &config, bool is_flac) {
     if (!config.is_enabled(MetadataField::AlbumArtist)) return;
     std::string name = is_flac ? build_flac_album_artist(meta) : build_mp3_album_artist(meta);
     if (!name.empty()) push(tags, "ALBUMARTIST", std::move(name));
 }
 
-void apply_artist(ae::TagData &tags, const ComprehensiveMetadata &meta,
+void apply_artist(arc::TagData &tags, const ComprehensiveMetadata &meta,
                   const MetadataConfig &config, bool is_flac) {
     if (!config.is_enabled(MetadataField::Artist)) return;
 
@@ -332,14 +332,14 @@ std::vector<std::string> build_mp3_composers(const ComprehensiveMetadata &meta) 
     return get_composer_fallback(meta);
 }
 
-void apply_composer(ae::TagData &tags, const ComprehensiveMetadata &meta,
+void apply_composer(arc::TagData &tags, const ComprehensiveMetadata &meta,
                     const MetadataConfig &config, bool is_flac) {
     if (!config.is_enabled(MetadataField::Composer)) return;
     auto composers = is_flac ? build_flac_composers(meta) : build_mp3_composers(meta);
     if (!composers.empty()) push(tags, "COMPOSER", join(composers, "/"));
 }
 
-void apply_producer(ae::TagData &tags, const ComprehensiveMetadata &meta,
+void apply_producer(arc::TagData &tags, const ComprehensiveMetadata &meta,
                     const MetadataConfig &config, bool is_flac) {
     if (!config.is_enabled(MetadataField::Producer) || !is_flac || !meta.performers) return;
     for (auto &producer : extract_producers_from_performers(*meta.performers)) {
@@ -347,10 +347,10 @@ void apply_producer(ae::TagData &tags, const ComprehensiveMetadata &meta,
     }
 }
 
-void apply_cover_art(ae::TagData &tags, const ComprehensiveMetadata &meta,
+void apply_cover_art(arc::TagData &tags, const ComprehensiveMetadata &meta,
                      const MetadataConfig &config) {
     if (!config.is_enabled(MetadataField::CoverArt) || !meta.cover_art_data) return;
-    ae::CoverArt cover;
+    arc::CoverArt cover;
     cover.mime_type = "image/jpeg";
     cover.data = *meta.cover_art_data;
     tags.cover = std::move(cover);
@@ -363,7 +363,7 @@ Result<void> embed_metadata_in_file(const std::string &path,
                                     const MetadataConfig &config) {
     bool is_flac = !ends_with_icase(path, ".mp3");
 
-    ae::TagData tags;
+    arc::TagData tags;
     tags.clear_existing = true;
 
     apply_title(tags, meta, config);
@@ -384,7 +384,7 @@ Result<void> embed_metadata_in_file(const std::string &path,
     apply_cover_art(tags, meta, config);
     if (is_flac) apply_flac_custom_keys(tags, meta, config);
 
-    auto result = ae::write_tags(path, tags);
+    auto result = arc::write_tags(path, tags);
     if (!result.ok()) return from_engine(result.error());
     return {};
 }

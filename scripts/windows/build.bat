@@ -10,5 +10,5 @@ cmake -S core -B build -G Ninja -DCMAKE_BUILD_TYPE=Release %*
 cmake --build build
 
 echo.
-echo Done: build\ (kobuzapi_core, ae_util, ae_net, ae_tag)
+echo Done: build\ (kobuzapi_core, arc_util, arc_net, arc_tag)
 endlocal

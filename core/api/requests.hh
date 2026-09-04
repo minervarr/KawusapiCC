@@ -10,7 +10,7 @@
 #include <utility>
 #include <vector>
 
-#include "ae/http.hh"
+#include "arc/http.hh"
 #include "../core/errors.hh"
 #include "../core/json.hh"
 
@@ -42,32 +42,32 @@ std::string build_url_with_params(const std::string &base_url, const std::string
 // Status-handling part of parse_response: success -> body; 404 ->
 // ResourceNotFound; other errors -> ApiErrorResponse (decoding the API's
 // {code, message} body when present).
-Result<std::string> handle_response(const ae::HttpResponse &response,
+Result<std::string> handle_response(const arc::HttpResponse &response,
                                     const std::string &endpoint);
 
 // Signed GET (auth via X-User-Auth-Token header) with throttle + 429 retry.
-Result<std::string> signed_get_raw(const ae::HttpClient &client, const std::string &base_url,
+Result<std::string> signed_get_raw(const arc::HttpClient &client, const std::string &base_url,
                                    const std::string &endpoint, Params params,
                                    const RequestAuth &auth);
 
 // Unsigned POST form (login); user_auth_token omitted when empty.
-Result<std::string> post_raw(const ae::HttpClient &client, const std::string &base_url,
+Result<std::string> post_raw(const arc::HttpClient &client, const std::string &base_url,
                              const std::string &endpoint, Params params,
                              const std::string &app_id, const std::string &user_auth_token);
 
 // Signed POST form (favorites mutation endpoints).
-Result<std::string> signed_post_raw(const ae::HttpClient &client, const std::string &base_url,
+Result<std::string> signed_post_raw(const arc::HttpClient &client, const std::string &base_url,
                                     const std::string &endpoint, Params params,
                                     const RequestAuth &auth);
 
 // Signed track file URL request (src/api/content/tracks.rs,
 // get_track_file_url_raw): fixed-format signature, throttle + 429 retry.
-Result<FileUrl> get_track_file_url_raw(const ae::HttpClient &client,
+Result<FileUrl> get_track_file_url_raw(const arc::HttpClient &client,
                                        const std::string &base_url, const RequestAuth &auth,
                                        std::int64_t track_id, int format_id);
 
 template <typename T>
-Result<T> signed_get(const ae::HttpClient &client, const std::string &base_url,
+Result<T> signed_get(const arc::HttpClient &client, const std::string &base_url,
                      const std::string &endpoint, Params params, const RequestAuth &auth) {
     auto raw = signed_get_raw(client, base_url, endpoint, std::move(params), auth);
     if (!raw.ok()) return raw.error();
@@ -75,7 +75,7 @@ Result<T> signed_get(const ae::HttpClient &client, const std::string &base_url,
 }
 
 template <typename T>
-Result<T> post(const ae::HttpClient &client, const std::string &base_url,
+Result<T> post(const arc::HttpClient &client, const std::string &base_url,
                const std::string &endpoint, Params params, const std::string &app_id,
                const std::string &user_auth_token) {
     auto raw = post_raw(client, base_url, endpoint, std::move(params), app_id, user_auth_token);
@@ -84,7 +84,7 @@ Result<T> post(const ae::HttpClient &client, const std::string &base_url,
 }
 
 template <typename T>
-Result<T> signed_post(const ae::HttpClient &client, const std::string &base_url,
+Result<T> signed_post(const arc::HttpClient &client, const std::string &base_url,
                       const std::string &endpoint, Params params, const RequestAuth &auth) {
     auto raw = signed_post_raw(client, base_url, endpoint, std::move(params), auth);
     if (!raw.ok()) return raw.error();

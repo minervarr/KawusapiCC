@@ -29,7 +29,7 @@ struct DownloadOptions {
     // Metadata embedding configuration; disabled when unset.
     std::optional<MetadataConfig> metadata;
     // Concurrent track downloads for album/playlist (default 8). Multiplies
-    // with Options::max_segments; ae::HttpClient caps the total socket count.
+    // with Options::max_segments; arc::HttpClient caps the total socket count.
     std::optional<int> concurrency;
     // Checked between and during downloads.
     const std::atomic<bool> *cancel = nullptr;

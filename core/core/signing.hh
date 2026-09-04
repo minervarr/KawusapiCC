@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-#include "ae/hash.hh"
+#include "arc/hash.hh"
 
 namespace kb {
 
@@ -26,7 +26,7 @@ inline std::string sign_request(const std::string &method, const std::string &en
         input += value;
     }
     input += app_secret;
-    return ae::md5_hex(input);
+    return arc::md5_hex(input);
 }
 
 // Fixed-format hash for track file URL requests.
@@ -36,7 +36,7 @@ inline std::string sign_track_file_url(int format_id, std::int64_t track_id,
     std::string input = "trackgetFileUrlformat_id" + std::to_string(format_id) +
                         "intentstreamtrack_id" + std::to_string(track_id) + timestamp +
                         app_secret;
-    return ae::md5_hex(input);
+    return arc::md5_hex(input);
 }
 
 } // namespace kb

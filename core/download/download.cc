@@ -7,7 +7,7 @@
 #include <mutex>
 #include <thread>
 
-#include "ae/log.hh"
+#include "arc/log.hh"
 #include "../metadata/embedder.hh"
 #include "../metadata/extractor.hh"
 
@@ -52,7 +52,7 @@ std::optional<std::vector<uint8_t>> fetch_cover_bytes(const QobuzApiService &ser
                                                       const std::string &token) {
     auto resp = service.http_client().get(url, {}, {"X-User-Auth-Token: " + token});
     if (!resp.ok() || resp.value().status < 200 || resp.value().status >= 300) {
-        AE_LOGD("Cover art download failed for %s", url.c_str());
+        ARC_LOGD("Cover art download failed for %s", url.c_str());
         return std::nullopt;
     }
     const std::string &body = resp.value().body;
@@ -72,7 +72,7 @@ Result<bool> attempt_download(const QobuzApiService &service, int track_id, int 
         return download_error("No download URL for track " + std::to_string(track_id));
     }
 
-    ae::ProgressFn progress;
+    arc::ProgressFn progress;
     if (options.progress) {
         auto fn = options.progress;
         progress = [fn, track_id](uint64_t downloaded, uint64_t total) {
@@ -86,7 +86,7 @@ Result<bool> attempt_download(const QobuzApiService &service, int track_id, int 
 
     bool resumed = offset.has_value() && outcome.value().resumed;
     if (offset && !resumed) {
-        AE_LOGW("track %d: server ignored Range request, re-downloaded full file", track_id);
+        ARC_LOGW("track %d: server ignored Range request, re-downloaded full file", track_id);
     }
     return resumed;
 }
@@ -152,11 +152,11 @@ Result<std::string> download_album_track(const QobuzApiService &service, int tra
             // 416: the Range offset reached the end — file already complete.
             if (offset && e.code == ErrorCode::Http && e.api_code == 416 &&
                 fs::exists(fs::u8path(path))) {
-                AE_LOGI("track %d already complete, skipping", track_id);
+                ARC_LOGI("track %d already complete, skipping", track_id);
                 return path;
             }
             if (is_retryable_network_error(e) && attempt < MAX_DOWNLOAD_RETRIES) {
-                AE_LOGW("track %d download failed (attempt %u): %s", track_id, attempt,
+                ARC_LOGW("track %d download failed (attempt %u): %s", track_id, attempt,
                         e.message.c_str());
                 backoff_sleep(attempt);
                 last_err = e;
@@ -164,7 +164,7 @@ Result<std::string> download_album_track(const QobuzApiService &service, int tra
             }
             return e;
         }
-        AE_LOGI("track %d downloaded (resumed=%d)", track_id, result.value() ? 1 : 0);
+        ARC_LOGI("track %d downloaded (resumed=%d)", track_id, result.value() ? 1 : 0);
         return path;
     }
 
@@ -280,7 +280,7 @@ Result<std::string> download_track(const QobuzApiService &service, int track_id,
 
         const Error &e = result.error();
         if (is_retryable_network_error(e) && attempt < MAX_DOWNLOAD_RETRIES) {
-            AE_LOGW("track %d download failed (attempt %u): %s, retrying with resume",
+            ARC_LOGW("track %d download failed (attempt %u): %s, retrying with resume",
                     track_id, attempt, e.message.c_str());
             backoff_sleep(attempt);
             continue;
@@ -291,7 +291,7 @@ Result<std::string> download_track(const QobuzApiService &service, int track_id,
     cancel_check = check_cancel(options.cancel);
     if (!cancel_check.ok()) return cancel_check.error();
 
-    AE_LOGI("track %d downloaded to %s", track_id, path.c_str());
+    ARC_LOGI("track %d downloaded to %s", track_id, path.c_str());
 
     if (options.metadata) {
         auto token = service.require_auth_token();
@@ -348,7 +348,7 @@ Result<std::vector<std::string>> download_album(const QobuzApiService &service,
             paths.push_back(results[i]->value());
         } else {
             if (results[i]) {
-                AE_LOGE("track %d failed: %s", track_ids[i],
+                ARC_LOGE("track %d failed: %s", track_ids[i],
                         results[i]->error().message.c_str());
             }
             ++failed;
@@ -359,10 +359,10 @@ Result<std::vector<std::string>> download_album(const QobuzApiService &service,
         return download_error("All " + std::to_string(failed) + " track(s) failed to download");
     }
     if (failed > 0) {
-        AE_LOGW("%zu track(s) failed, %zu succeeded", failed, paths.size());
+        ARC_LOGW("%zu track(s) failed, %zu succeeded", failed, paths.size());
     }
 
-    AE_LOGI("album %s download complete (%zu tracks)", album_id.c_str(), paths.size());
+    ARC_LOGI("album %s download complete (%zu tracks)", album_id.c_str(), paths.size());
 
     if (options.metadata) {
         auto embedded = embed_album_metadata(service, album.value(), downloaded_ids, paths,
@@ -420,7 +420,7 @@ Result<std::vector<std::string>> download_playlist(const QobuzApiService &servic
             paths.push_back(results[i]->value());
         } else {
             if (results[i]) {
-                AE_LOGE("track %d failed: %s", track_ids[i],
+                ARC_LOGE("track %d failed: %s", track_ids[i],
                         results[i]->error().message.c_str());
             }
             ++failed;
@@ -431,10 +431,10 @@ Result<std::vector<std::string>> download_playlist(const QobuzApiService &servic
         return download_error("All " + std::to_string(failed) + " track(s) failed to download");
     }
     if (failed > 0) {
-        AE_LOGW("%zu track(s) failed, %zu succeeded", failed, paths.size());
+        ARC_LOGW("%zu track(s) failed, %zu succeeded", failed, paths.size());
     }
 
-    AE_LOGI("playlist %s download complete (%zu tracks)", playlist_id.c_str(), paths.size());
+    ARC_LOGI("playlist %s download complete (%zu tracks)", playlist_id.c_str(), paths.size());
     return paths;
 }
 
@@ -480,7 +480,7 @@ Result<std::vector<std::string>> download_artist(const QobuzApiService &service,
             all_paths.insert(all_paths.end(), paths.begin(), paths.end());
         } else {
             if (results[i]) {
-                AE_LOGE("album %s failed: %s", album_ids[i].c_str(),
+                ARC_LOGE("album %s failed: %s", album_ids[i].c_str(),
                         results[i]->error().message.c_str());
             }
             ++failed;
@@ -491,10 +491,10 @@ Result<std::vector<std::string>> download_artist(const QobuzApiService &service,
         return download_error("All " + std::to_string(failed) + " album(s) failed to download");
     }
     if (failed > 0) {
-        AE_LOGW("%zu album(s) failed, %zu tracks succeeded", failed, all_paths.size());
+        ARC_LOGW("%zu album(s) failed, %zu tracks succeeded", failed, all_paths.size());
     }
 
-    AE_LOGI("artist %d download complete (%zu tracks)", artist_id, all_paths.size());
+    ARC_LOGI("artist %d download complete (%zu tracks)", artist_id, all_paths.size());
     return all_paths;
 }
 

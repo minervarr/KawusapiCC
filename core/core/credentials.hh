@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-#include "ae/http.hh"
+#include "arc/http.hh"
 #include "errors.hh"
 
 namespace kb {
@@ -40,12 +40,12 @@ struct WebPlayerCredentials {
 // Extracts the app id and all decodable secret candidates from the Qobuz web
 // player JS bundle. `http` must be a plain client ("Mozilla/5.0" user agent,
 // no API headers).
-Result<WebPlayerCredentials> extract_all_from_web_player(const ae::HttpClient &http);
+Result<WebPlayerCredentials> extract_all_from_web_player(const arc::HttpClient &http);
 
 // extract_all_from_web_player narrowed to the first secret candidate. Only
 // safe where the result is validated (or discarded) downstream.
 Result<std::pair<std::string, std::string>> extract_from_web_player(
-    const ae::HttpClient &http);
+    const arc::HttpClient &http);
 
 namespace detail {
 // Exposed for testing; mirror the Rust helpers.

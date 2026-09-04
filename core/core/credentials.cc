@@ -7,7 +7,7 @@
 #include <regex>
 #include <sstream>
 
-#include "ae/base64.hh"
+#include "arc/base64.hh"
 
 namespace kb {
 
@@ -201,7 +201,7 @@ Result<std::vector<std::string>> extract_app_secrets_from_bundle(const std::stri
         if (encoded.size() <= 44) continue;
         encoded.resize(encoded.size() - 44);
 
-        auto decoded = ae::base64_decode(encoded);
+        auto decoded = arc::base64_decode(encoded);
         if (!decoded) continue;
         (anchored ? preferred : rest).push_back(std::move(*decoded));
     }
@@ -222,7 +222,7 @@ Result<std::string> extract_app_secret_from_bundle(const std::string &js) {
 
 } // namespace detail
 
-Result<WebPlayerCredentials> extract_all_from_web_player(const ae::HttpClient &http) {
+Result<WebPlayerCredentials> extract_all_from_web_player(const arc::HttpClient &http) {
     auto login_page = http.get("https://play.qobuz.com/login");
     if (!login_page.ok()) return from_engine(login_page.error());
 
@@ -244,7 +244,7 @@ Result<WebPlayerCredentials> extract_all_from_web_player(const ae::HttpClient &h
     return creds;
 }
 
-Result<std::pair<std::string, std::string>> extract_from_web_player(const ae::HttpClient &http) {
+Result<std::pair<std::string, std::string>> extract_from_web_player(const arc::HttpClient &http) {
     auto creds = extract_all_from_web_player(http);
     if (!creds.ok()) return creds.error();
     return std::make_pair(std::move(creds.value().app_id),

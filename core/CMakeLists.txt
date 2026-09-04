@@ -11,9 +11,9 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 # CMakeLists.txt) — e.g. streamer's root CMakeLists.txt add_subdirectory()s
 # third_party/curl and third_party/taglib before add_subdirectory()'ing this
 # file. On Android those are cross-compiled automatically.
-set(AE_BUILD_ARCHIVE OFF CACHE BOOL "" FORCE)
-set(AE_BUILD_NET ON CACHE BOOL "" FORCE)
-set(AE_BUILD_TAG ON CACHE BOOL "" FORCE)
+set(ARC_BUILD_ARCHIVE OFF CACHE BOOL "" FORCE)
+set(ARC_BUILD_NET ON CACHE BOOL "" FORCE)
+set(ARC_BUILD_TAG ON CACHE BOOL "" FORCE)
 add_subdirectory(
     ${CMAKE_CURRENT_SOURCE_DIR}/../engine/archive_engine/core
     ${CMAKE_CURRENT_BINARY_DIR}/archive_engine
@@ -38,4 +38,4 @@ target_include_directories(kobuzapi_core PUBLIC
 )
 target_compile_features(kobuzapi_core PUBLIC cxx_std_17)
 
-target_link_libraries(kobuzapi_core PUBLIC ae_util ae_net ae_tag)
+target_link_libraries(kobuzapi_core PUBLIC arc_util arc_net arc_tag)
